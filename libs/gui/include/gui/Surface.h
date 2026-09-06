@@ -37,6 +37,13 @@
 
 namespace android {
 
+#ifndef NO_BINDER
+// NX809J: Qualcomm Game Post Processing hook (libs/gui/QtiExtension/QtiSurfaceExtensionGPP.h)
+namespace libguiextension {
+class QtiSurfaceExtensionGPP;
+}
+#endif
+
 class GraphicBuffer;
 
 #ifndef NO_BINDER
@@ -908,6 +915,12 @@ protected:
 
     // Buffers that are successfully dequeued/attached and handed to clients
     std::unordered_set<int> mDequeuedSlots;
+
+#ifndef NO_BINDER
+    // NX809J GPP: swaps mGraphicBufferProducer for a gppservice-backed producer on EGL connect.
+    friend class libguiextension::QtiSurfaceExtensionGPP;
+    std::shared_ptr<libguiextension::QtiSurfaceExtensionGPP> mQtiSurfaceGPPExtn = nullptr;
+#endif
 
     // Indicates whether this surface holds the mouse cursor, and subsequently determines whether
     // the GRALLOC_USAGE_CURSOR usage flag should be set on the buffer created when this surface is

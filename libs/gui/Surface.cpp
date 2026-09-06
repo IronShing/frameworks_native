@@ -19,6 +19,10 @@
 //#define LOG_NDEBUG 0
 
 #include <gui/Surface.h>
+#ifndef NO_BINDER
+// NX809J: Qualcomm Game Post Processing (super-resolution / frame interpolation) surface hook
+#include "QtiExtension/QtiSurfaceExtensionGPP.h"
+#endif
 
 #include <condition_variable>
 #include <cstddef>
@@ -42,6 +46,7 @@
 
 #include <android/native_window.h>
 
+#include <android-base/properties.h>
 #include <android-base/strings.h>
 #include <gui/FenceMonitor.h>
 #include <gui/TraceUtils.h>
@@ -191,9 +196,24 @@ Surface::Surface(const sp<IGraphicBufferProducer>& bufferProducer, bool controll
     } else {
         ALOGE("Failed to get surface config from BQ. Error: %d", status);
     }
+
+#ifndef NO_BINDER
+    // NX809J GPP: only when the device opted in (vendor.gpp.create_frc_extension=1). The
+    // extension itself bails out for system uids and when libgppextension.so is absent.
+    {
+        if (!mQtiSurfaceGPPExtn &&
+            android::base::GetIntProperty("vendor.gpp.create_frc_extension", 0) == 1) {
+            mQtiSurfaceGPPExtn = std::make_shared<libguiextension::QtiSurfaceExtensionGPP>(
+                    this, IGraphicBufferProducer::asBinder(bufferProducer), &mGraphicBufferProducer);
+        }
+    }
+#endif
 }
 
 Surface::~Surface() {
+#ifndef NO_BINDER
+    mQtiSurfaceGPPExtn = nullptr; // NX809J GPP: tears down the gppservice session first
+#endif
     if (mConnectedToCpu) {
         Surface::disconnect(NATIVE_WINDOW_API_CPU);
     }
@@ -274,6 +294,11 @@ sp<IGraphicBufferProducer> Surface::getIGraphicBufferProducer() const {
 
 void Surface::setSidebandStream(const sp<NativeHandle>& stream) {
     mGraphicBufferProducer->setSidebandStream(stream);
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->setSidebandStream(stream);
+    }
+#endif
 }
 
 void Surface::allocateBuffers() {
@@ -756,6 +781,11 @@ int Surface::dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd) {
     }
     SURF_LOGV("Surface::dequeueBuffer");
 
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
+    }
+#endif
     IGraphicBufferProducer::DequeueBufferInput dqInput;
     {
         Mutex::Autolock lock(mMutex);
@@ -928,6 +958,11 @@ int Surface::dequeueBuffers(std::vector<BatchBuffer>* buffers) {
     ATRACE_CALL();
     SURF_LOGV("Surface::dequeueBuffers");
 
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->DynamicEnable(&mGraphicBufferProducer);
+    }
+#endif
     if (buffers->size() == 0) {
         SURF_LOGE("%s: must dequeue at least 1 buffer!", __FUNCTION__);
         return BAD_VALUE;
@@ -1428,6 +1463,11 @@ void Surface::applyGrallocMetadataLocked(
 void Surface::onBufferQueuedLocked(int slot, const sp<Fence>& fence,
                                    const IGraphicBufferProducer::QueueBufferOutput& output) {
     mDequeuedSlots.erase(slot);
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->setQueuedBufferSlot(slot);
+    }
+#endif
     if (mSlots[slot].requiresFreeOnReturn) {
         mSlots[slot].buffer = nullptr;
         mSlots[slot].requiresFreeOnReturn = false;
@@ -1702,6 +1742,11 @@ int Surface::query(int what, int* value) const {
             }
         }
     }
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn && mQtiSurfaceGPPExtn->IsGPPEnabled()) {
+        return mQtiSurfaceGPPExtn->query(what, value);
+    }
+#endif
     return mGraphicBufferProducer->query(what, value);
 }
 
@@ -2343,6 +2388,12 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
     IGraphicBufferProducer::QueueBufferOutput output;
     mReportRemovedBuffers = reportBufferRemoval;
 
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        // May swap mGraphicBufferProducer for the GPP producer (EGL connections only).
+        mQtiSurfaceGPPExtn->Connect(api, &mGraphicBufferProducer);
+    }
+#endif
     if (listener != nullptr) {
         mListenerProxy = sp<ProducerListenerProxy>::make(wp<Surface>::fromExisting(this), listener,
                                                          needsAcquiredNotify, needsDroppedNotify);
@@ -2367,6 +2418,9 @@ int Surface::connect(int api, const sp<SurfaceListener>& listener, bool reportBu
         mConsumerRunningBehind = (output.numPendingBuffers >= 2);
 
 #if !defined(NO_BINDER)
+        if (mQtiSurfaceGPPExtn) {
+            mQtiSurfaceGPPExtn->StoreConnect(api, mListenerProxy, reportBufferRemoval);
+        }
         if (listener && listener->needsDeathNotify()) {
             mSurfaceDeathListener = sp<ProducerDeathListenerProxy>::make(listener);
             IInterface::asBinder(mGraphicBufferProducer)->linkToDeath(mSurfaceDeathListener);
@@ -2434,6 +2488,12 @@ int Surface::disconnect(int api, IGraphicBufferProducer::DisconnectMode mode) {
     if (api == NATIVE_WINDOW_API_CPU) {
         mConnectedToCpu = false;
     }
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        // Restores the original producer if GPP had swapped it in.
+        mQtiSurfaceGPPExtn->Disconnect(api, &mGraphicBufferProducer);
+    }
+#endif
 
     std::scoped_lock _dl(mDebugMutex);
     // Keep the old name in case we get subsequent calls, for logging.
@@ -2616,6 +2676,11 @@ int Surface::setBufferCount(int bufferCount)
     ATRACE_CALL();
     SURF_LOGV("Surface::setBufferCount");
     Mutex::Autolock lock(mMutex);
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->setBufferCount(bufferCount);
+    }
+#endif
 
     status_t err = NO_ERROR;
     if (bufferCount == 0) {
@@ -3247,6 +3312,11 @@ status_t Surface::setFrameRate(float frameRate, int8_t compatibility,
                                                         changeFrameRateStrategy);
     SURF_LOGE_IF(err, "IGraphicBufferProducer::setFrameRate(%.2f) returned %s", frameRate,
                  strerror(-err));
+#ifndef NO_BINDER
+    if (mQtiSurfaceGPPExtn) {
+        mQtiSurfaceGPPExtn->setFrameRate(frameRate, compatibility, changeFrameRateStrategy);
+    }
+#endif
     return err;
 }
 
@@ -3256,15 +3326,26 @@ status_t Surface::setFrameTimelineInfo(uint64_t /*frameNumber*/,
     return BAD_VALUE;
 }
 
+// NX809J: the prebuilt GPP producer was compiled against the A16 IGraphicBufferProducer and
+// has no vtable slots for the A17 additions below, so while GPP is active they must go to the
+// original (BufferQueue-backed) producer that the extension keeps.
+#ifndef NO_BINDER
+#define NX809J_GPP_SAFE_PRODUCER() \
+    ((mQtiSurfaceGPPExtn && mQtiSurfaceGPPExtn->IsGPPEnabled()) ? mQtiSurfaceGPPExtn->getOriginalGbp() \
+                                                              : mGraphicBufferProducer)
+#else
+#define NX809J_GPP_SAFE_PRODUCER() (mGraphicBufferProducer)
+#endif
+
 status_t Surface::setProducerThrottlingEnabled(bool enabled) {
-    status_t err = mGraphicBufferProducer->setProducerThrottlingEnabled(enabled);
+    status_t err = NX809J_GPP_SAFE_PRODUCER()->setProducerThrottlingEnabled(enabled);
     SURF_LOGE_IF(err, "IGraphicBufferProducer::setProducerThrottlingEnabled(%s) returned %s",
                  enabled ? "true" : "false", strerror(-err));
     return err;
 }
 
 status_t Surface::isProducerThrottlingEnabled(bool* outEnabled) const {
-    status_t err = mGraphicBufferProducer->isProducerThrottlingEnabled(outEnabled);
+    status_t err = NX809J_GPP_SAFE_PRODUCER()->isProducerThrottlingEnabled(outEnabled);
     return err;
 }
 
@@ -3280,7 +3361,7 @@ status_t Surface::setAdditionalOptions(const std::vector<gui::AdditionalOptions>
 #endif
 
 status_t Surface::setPresentMode(int32_t mode) {
-    return mGraphicBufferProducer->setPresentMode(mode);
+    return NX809J_GPP_SAFE_PRODUCER()->setPresentMode(mode);
 }
 
 sp<IBinder> Surface::getSurfaceControlHandle() const {

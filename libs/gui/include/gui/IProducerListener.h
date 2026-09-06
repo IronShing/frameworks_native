@@ -58,11 +58,6 @@ public:
     // multiple threads.
     virtual void onBufferDetached(int /*slot*/, uint64_t /*bufferId*/) {} // Asynchronous
 
-    virtual void onBufferAcquired(uint64_t /*bufferId*/, uint64_t /*frameNumber*/) {}
-    virtual bool needsAcquiredNotify() { return false; }
-    virtual void onBufferDropped(uint64_t /*bufferId*/, uint64_t /*frameNumber*/) {}
-    virtual bool needsDroppedNotify() { return false; }
-
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_CONSUMER_ATTACH_CALLBACK)
     // onBufferAttached is called from IGraphicBufferConsumer::attachBuffer to
     // notify the producer that a buffer is attached.
@@ -73,6 +68,11 @@ public:
     virtual void onBufferAttached() {} // Asynchronous
     virtual bool needsAttachNotify() { return false; }
 #endif
+
+    virtual void onBufferAcquired(uint64_t /*bufferId*/, uint64_t /*frameNumber*/) {}
+    virtual bool needsAcquiredNotify() { return false; }
+    virtual void onBufferDropped(uint64_t /*bufferId*/, uint64_t /*frameNumber*/) {}
+    virtual bool needsDroppedNotify() { return false; }
 };
 
 #ifndef NO_BINDER
@@ -96,6 +96,9 @@ public:
             Parcel* reply, uint32_t flags = 0);
     virtual bool needsReleaseNotify();
     virtual void onBuffersDiscarded(const std::vector<int32_t>& slots);
+    // NX809J GPP: out-of-line like QSSI16 (BQ_CONSUMER_ATTACH_CALLBACK); the prebuilt
+    // gppservice/libgpphexlpsession vtables reference BnProducerListener::needsAttachNotify.
+    virtual bool needsAttachNotify();
 };
 
 #else
@@ -109,6 +112,7 @@ public:
     virtual ~StubProducerListener();
     virtual void onBufferReleased() {}
     virtual bool needsReleaseNotify() { return false; }
+    virtual bool needsAttachNotify() { return false; }
 };
 
 } // namespace android

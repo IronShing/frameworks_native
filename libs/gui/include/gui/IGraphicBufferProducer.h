@@ -128,8 +128,6 @@ public:
         virtual status_t readFromParcel(const android::Parcel* parcel) override;
     };
 
-    virtual status_t getConfigForSurface(SurfaceConfig* outConfig);
-
     // requestBuffer requests a new buffer for the given index. The server (i.e.
     // the IGraphicBufferProducer implementation) assigns the newly created
     // buffer to the given slot index, and the client is expected to mirror the
@@ -466,10 +464,13 @@ public:
         uint64_t nextFrameNumber{0};
         FrameEventHistoryDelta frameTimestamps;
         bool bufferReplaced{false};
-        uint64_t bufferReplacedFrameId{0};
         int maxBufferCount{BufferQueueDefs::NUM_BUFFER_SLOTS};
         bool isSlotExpansionAllowed{false};
         status_t result{NO_ERROR};
+        // NX809J: kept LAST so the struct layout up to `result` matches the A16/QSSI
+        // header the prebuilt Qualcomm GPP producer (libgpphexlpsession.so) was built
+        // against (it writes maxBufferCount/isSlotExpansionAllowed/result by offset).
+        uint64_t bufferReplacedFrameId{0};
     };
 
     // queueBuffer indicates that the client has finished filling in the
@@ -748,17 +749,9 @@ public:
     virtual status_t setFrameRate(float frameRate, int8_t compatibility,
                                   int8_t changeFrameRateStrategy);
 
-    // Control CPU throttling for Vulkan/EGL producers
-    virtual status_t setProducerThrottlingEnabled(bool enabled);
-    // Returns whether CPU throttling is enabled for Vulkan/EGL producers
-    virtual status_t isProducerThrottlingEnabled(bool* outEnabled) const;
-
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
     virtual status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options);
 #endif
-
-    // setPresentMode sets the buffer acquisition mode.
-    virtual status_t setPresentMode(int32_t mode);
 
     struct RequestBufferOutput : public Flattenable<RequestBufferOutput> {
         RequestBufferOutput() = default;
@@ -919,6 +912,23 @@ protected:
     // ProducerQueueParcelable object.
     virtual status_t exportToParcel(Parcel* parcel);
 #endif
+
+public:
+    // NX809J: the following virtuals were added by A17 in the middle of this
+    // interface. They are kept at the END so the vtable slot order of every method
+    // up to exportToParcel() matches the A16/QSSI libgui the prebuilt Qualcomm GPP
+    // blobs (gppservice, libgpphexlpsession.so GPPProducer) were compiled against.
+    // Surface never calls these on a GPP-provided producer (see Surface.cpp guards).
+    virtual status_t getConfigForSurface(SurfaceConfig* outConfig);
+
+    // Control CPU throttling for Vulkan/EGL producers
+    virtual status_t setProducerThrottlingEnabled(bool enabled);
+    // Returns whether CPU throttling is enabled for Vulkan/EGL producers
+    virtual status_t isProducerThrottlingEnabled(bool* outEnabled) const;
+
+    // setPresentMode sets the buffer acquisition mode.
+    virtual status_t setPresentMode(int32_t mode);
+
 };
 
 // ----------------------------------------------------------------------------
