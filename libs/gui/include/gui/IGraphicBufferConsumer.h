@@ -133,8 +133,16 @@ public:
     //               * the fence was NULL
     //               * the buffer slot specified is not in the acquired state
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
-    virtual status_t releaseBuffer(int buf, uint64_t frameNumber,
-                                   const sp<Fence>& releaseFence) = 0;
+    // NX809J GPP: the prebuilt QSSI16 gppservice/libgpphexlpsession blobs were built with
+    // bq_gl_fence_cleanup OFF, so their view of this vtable slot is the legacy 5-argument
+    // releaseBuffer(buf, frameNumber, EGLDisplay, EGLSyncKHR, releaseFence). Keep that
+    // signature in this slot (forwarding to the real one) and declare the 3-argument
+    // version at the END of the vtable so every later slot keeps its original index.
+    // Do not reorder or add virtuals above dumpState().
+    virtual status_t releaseBuffer(int buf, uint64_t frameNumber, EGLDisplay /*display*/,
+                                   EGLSyncKHR /*fence*/, const sp<Fence>& releaseFence) {
+        return releaseBuffer(buf, frameNumber, releaseFence);
+    }
 #else
     virtual status_t releaseBuffer(int buf, uint64_t frameNumber, EGLDisplay display,
                                    EGLSyncKHR fence, const sp<Fence>& releaseFence) = 0;
@@ -317,6 +325,12 @@ public:
         dumpState(String8(prefix), &returned);
         result.append(returned);
     }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    // NX809J GPP: appended after every QSSI16-era slot (see the legacy overload above).
+    virtual status_t releaseBuffer(int buf, uint64_t frameNumber,
+                                   const sp<Fence>& releaseFence) = 0;
+#endif
 };
 
 } // namespace android

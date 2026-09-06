@@ -127,7 +127,7 @@ status_t IGraphicBufferProducer::QueueBufferInput::unflatten(
 ////////////////////////////////////////////////////////////////////////
 constexpr size_t IGraphicBufferProducer::QueueBufferOutput::minFlattenedSize() {
     return sizeof(width) + sizeof(height) + sizeof(transformHint) + sizeof(numPendingBuffers) +
-            sizeof(nextFrameNumber) + sizeof(bufferReplaced) + sizeof(bufferReplacedFrameId) +
+            sizeof(nextFrameNumber) + sizeof(bufferReplaced) + sizeof(uint64_t) /* replaced frame id, out-of-band */ +
             sizeof(maxBufferCount) + sizeof(result) + sizeof(isSlotExpansionAllowed);
 }
 size_t IGraphicBufferProducer::QueueBufferOutput::getFlattenedSize() const {
@@ -151,7 +151,7 @@ status_t IGraphicBufferProducer::QueueBufferOutput::flatten(
     FlattenableUtils::write(buffer, size, numPendingBuffers);
     FlattenableUtils::write(buffer, size, nextFrameNumber);
     FlattenableUtils::write(buffer, size, bufferReplaced);
-    FlattenableUtils::write(buffer, size, bufferReplacedFrameId);
+    FlattenableUtils::write(buffer, size, getLastReplacedFrameId());
     FlattenableUtils::write(buffer, size, maxBufferCount);
     FlattenableUtils::write(buffer, size, isSlotExpansionAllowed);
 
@@ -176,7 +176,11 @@ status_t IGraphicBufferProducer::QueueBufferOutput::unflatten(
     FlattenableUtils::read(buffer, size, numPendingBuffers);
     FlattenableUtils::read(buffer, size, nextFrameNumber);
     FlattenableUtils::read(buffer, size, bufferReplaced);
-    FlattenableUtils::read(buffer, size, bufferReplacedFrameId);
+    {
+        uint64_t replacedFrameId = 0;
+        FlattenableUtils::read(buffer, size, replacedFrameId);
+        setLastReplacedFrameId(replacedFrameId);
+    }
     FlattenableUtils::read(buffer, size, maxBufferCount);
     FlattenableUtils::read(buffer, size, isSlotExpansionAllowed);
 
@@ -425,6 +429,17 @@ status_t IGraphicBufferProducer::QueryOutput::unflatten(void const* buffer, size
     FlattenableUtils::read(buffer, size, value);
 
     return NO_ERROR;
+}
+
+// NX809J GPP: see the comment on QueueBufferOutput in IGraphicBufferProducer.h.
+static thread_local uint64_t gLastReplacedFrameId = 0;
+
+void IGraphicBufferProducer::QueueBufferOutput::setLastReplacedFrameId(uint64_t id) {
+    gLastReplacedFrameId = id;
+}
+
+uint64_t IGraphicBufferProducer::QueueBufferOutput::getLastReplacedFrameId() {
+    return gLastReplacedFrameId;
 }
 
 } // namespace android

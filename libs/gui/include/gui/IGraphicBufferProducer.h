@@ -467,10 +467,14 @@ public:
         int maxBufferCount{BufferQueueDefs::NUM_BUFFER_SLOTS};
         bool isSlotExpansionAllowed{false};
         status_t result{NO_ERROR};
-        // NX809J: kept LAST so the struct layout up to `result` matches the A16/QSSI
-        // header the prebuilt Qualcomm GPP producer (libgpphexlpsession.so) was built
-        // against (it writes maxBufferCount/isSlotExpansionAllowed/result by offset).
-        uint64_t bufferReplacedFrameId{0};
+        // NX809J GPP: A17 added `uint64_t bufferReplacedFrameId` here, which makes this struct
+        // 8 bytes larger than the QSSI16 layout the prebuilt gppservice was compiled with;
+        // Bp::connect()/queueBuffer() then write past the caller's stack object ("stack
+        // corruption detected" in gppservice). The value is carried out-of-band instead:
+        // set by BufferQueueProducer::queueBuffer / unflatten(), read by Surface on the same
+        // thread right after the call. Static members do not change the layout.
+        static void setLastReplacedFrameId(uint64_t id);
+        static uint64_t getLastReplacedFrameId();
     };
 
     // queueBuffer indicates that the client has finished filling in the

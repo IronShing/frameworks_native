@@ -65,6 +65,7 @@ public:
     // had received a onBuffersReleased() call with a mask set for the released
     // buffer.
 #if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_GL_FENCE_CLEANUP)
+    using IGraphicBufferConsumer::releaseBuffer; // NX809J GPP: keep legacy 5-arg overload visible
     virtual status_t releaseBuffer(int slot, uint64_t frameNumber,
                                    const sp<Fence>& releaseFence) override;
 #else
