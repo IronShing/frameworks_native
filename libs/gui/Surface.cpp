@@ -1418,12 +1418,13 @@ status_t Surface::queueBufferImpl(const sp<GraphicBuffer>& buffer, const sp<Fenc
     // ->   implementation calls IGraphicBufferConsumer::acquire/release immediately
     // -> SurfaceListener::onBufferReleased callback triggers automatically
     // ->   implementation calls Surface::dequeueBuffer
+    IGraphicBufferProducer::QueueBufferOutput::setLastReplacedFrameId(0); // NX809J GPP
     status_t err = mGraphicBufferProducer->queueBuffer(slot, igbpInput, &igbpOutput);
     {
         Mutex::Autolock lock(mMutex);
 
         if (igbpOutput.bufferReplaced) {
-            mLastReplacedFrameId = igbpOutput.bufferReplacedFrameId;
+            mLastReplacedFrameId = IGraphicBufferProducer::QueueBufferOutput::getLastReplacedFrameId();
         }
         mLastQueueDuration = systemTime() - now;
         if (err != OK) {
@@ -1589,12 +1590,13 @@ int Surface::queueBuffers(const std::vector<BatchQueuedBuffer>& buffers,
         }
     }
     nsecs_t now = systemTime();
+    IGraphicBufferProducer::QueueBufferOutput::setLastReplacedFrameId(0); // NX809J GPP
     err = mGraphicBufferProducer->queueBuffers(igbpQueueBufferInputs, &igbpQueueBufferOutputs);
     {
         Mutex::Autolock lock(mMutex);
 
         if (!igbpQueueBufferOutputs.empty() && igbpQueueBufferOutputs.back().bufferReplaced) {
-            mLastReplacedFrameId = igbpQueueBufferOutputs.back().bufferReplacedFrameId;
+            mLastReplacedFrameId = IGraphicBufferProducer::QueueBufferOutput::getLastReplacedFrameId();
         }
         mLastQueueDuration = systemTime() - now;
         if (err != OK) {
