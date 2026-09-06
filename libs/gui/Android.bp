@@ -329,6 +329,8 @@ filegroup {
         "StreamSplitter.cpp",
         "ScreenCaptureResults.cpp",
         "Surface.cpp",
+        // NX809J: Qualcomm Game Post Processing surface hook (super-res / frame interpolation)
+        "QtiExtension/QtiSurfaceExtensionGPP.cpp",
         "SurfaceControl.cpp",
         "SurfaceComposerClient.cpp",
         "SyncFeatures.cpp",

@@ -123,3 +123,14 @@ status_t IGraphicBufferProducer::query(const std::vector<int32_t>& inputs,
 }
 
 } // namespace android
+
+// NX809J: ABI alias for the A16/QSSI spelling of the batched query, which took the
+// input vector by value. The prebuilt Qualcomm GPP producer (libgpphexlpsession.so)
+// references that mangled name from its GPPProducer vtable. A non-trivially-copyable
+// by-value parameter is passed by invisible reference under the Itanium C++ ABI and
+// destroyed by the caller, so the by-reference implementation above is binary
+// compatible; this just gives it the second name.
+__asm__(".globl _ZN7android22IGraphicBufferProducer5queryENSt3__16vectorIiNS1_9allocatorIiEEEEPNS2_INS0_11QueryOutputENS3_IS6_EEEE\n"
+        ".type _ZN7android22IGraphicBufferProducer5queryENSt3__16vectorIiNS1_9allocatorIiEEEEPNS2_INS0_11QueryOutputENS3_IS6_EEEE, %function\n"
+        ".set _ZN7android22IGraphicBufferProducer5queryENSt3__16vectorIiNS1_9allocatorIiEEEEPNS2_INS0_11QueryOutputENS3_IS6_EEEE, "
+        "_ZN7android22IGraphicBufferProducer5queryERKNSt3__16vectorIiNS1_9allocatorIiEEEEPNS2_INS0_11QueryOutputENS3_IS8_EEEE\n");

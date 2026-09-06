@@ -230,6 +230,10 @@ bool BnProducerListener::needsReleaseNotify() {
     return true;
 }
 
+bool BnProducerListener::needsAttachNotify() {
+    return true;
+}
+
 void BnProducerListener::onBuffersDiscarded(const std::vector<int32_t>& /*discardedSlots*/) {
 }
 
