@@ -98,6 +98,7 @@ BufferQueueCore::BufferQueueCore()
         mLinkedToDeath(),
         mConnectedProducerListener(),
         mBufferReleasedCbEnabled(false),
+        mBufferAttachedCbEnabled(false),
         mBufferAcquiredCbEnabled(false),
         mBufferDroppedCbEnabled(false),
         mSlots(BufferQueueDefs::NUM_BUFFER_SLOTS),
