@@ -239,12 +239,28 @@ status_t BufferReleaseChannel::ProducerEndpoint::writeReleaseFence(
         memcpy(CMSG_DATA(cmsg), &flattenedFd, sizeof(int));
     }
 
+    // The producer end is written from SurfaceFlinger's main thread. AF_UNIX SEQPACKET sendmsg()
+    // blocks once the consumer's receive queue is full, so an app that stops draining its
+    // BufferReleaseChannel (frozen, deadlocked, thrashing) used to hang SurfaceFlinger and, behind
+    // its WM lock, system_server -- a hard freeze until the power key is held. The socket has
+    // SO_SNDTIMEO (see open()), so this returns EAGAIN after a bounded wait; once that happens
+    // switch to MSG_DONTWAIT for this channel so every further release is dropped instantly
+    // instead of paying the timeout per frame, and go back to blocking once a send succeeds.
     ssize_t result;
     do {
-        result = sendmsg(mFd, &msg, 0);
+        result = sendmsg(mFd, &msg, mStalled ? MSG_DONTWAIT : 0);
     } while (result == -1 && errno == EINTR);
     if (result == -1) {
+        if ((errno == EAGAIN || errno == EWOULDBLOCK) && !mStalled) {
+            ALOGE("[%s] consumer is not draining release fences; dropping releases until it does",
+                  mName.c_str());
+            mStalled = true;
+        }
         return -errno;
+    }
+    if (mStalled) {
+        ALOGW("[%s] consumer is draining release fences again", mName.c_str());
+        mStalled = false;
     }
 
     return OK;
@@ -329,6 +345,16 @@ status_t BufferReleaseChannel::open(std::string name,
     if (setsockopt(producerFd.get(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeval)) == -1) {
         ALOGE("[%s] Failed to set producer socket timeout. errno=%d message='%s'", name.c_str(),
               errno, strerror(errno));
+        return -errno;
+    }
+
+    // Bound how long the producer (SurfaceFlinger main thread) can block in sendmsg() when the
+    // consumer's queue is full. See ProducerEndpoint::writeReleaseFence.
+    const timeval sendTimeout{.tv_sec = 0, .tv_usec = 100 * 1000};
+    if (setsockopt(producerFd.get(), SOL_SOCKET, SO_SNDTIMEO, &sendTimeout, sizeof(timeval)) ==
+        -1) {
+        ALOGE("[%s] Failed to set producer socket send timeout. errno=%d message='%s'",
+              name.c_str(), errno, strerror(errno));
         return -errno;
     }
 
