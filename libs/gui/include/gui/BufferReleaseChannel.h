@@ -87,6 +87,9 @@ public:
 
     private:
         std::vector<uint8_t> mFlattenedBuffer;
+        // Set once a send timed out because the consumer stopped draining; while set, sends are
+        // non-blocking so a stuck app cannot stall the producer thread.
+        bool mStalled = false;
     };
 
     /**
