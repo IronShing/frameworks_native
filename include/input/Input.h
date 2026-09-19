@@ -967,6 +967,18 @@ public:
                     size_t pointerCount, const PointerProperties* pointerProperties,
                     const PointerCoords* pointerCoords);
 
+    // NX809J: ABI-compat overload for Qualcomm's prebuilt Wi-Fi Display UIBC JNI
+    // (libwfdnative.so, QSSI16), built when `flags` was still a plain int32_t.
+    // Forwards to the ftl::Flags<MotionFlag> version. Not for new code.
+    void initialize(int32_t id, DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId,
+                    std::array<uint8_t, 32> hmac, int32_t action, int32_t actionButton,
+                    int32_t flags, int32_t edgeFlags, int32_t metaState, int32_t buttonState,
+                    MotionClassification classification, const ui::Transform& transform,
+                    float xPrecision, float yPrecision, float rawXCursorPosition,
+                    float rawYCursorPosition, const ui::Transform& rawTransform, nsecs_t downTime,
+                    nsecs_t eventTime, size_t pointerCount,
+                    const PointerProperties* pointerProperties, const PointerCoords* pointerCoords);
+
     void copyFrom(const MotionEvent* other, bool keepHistory);
 
     // Initialize this event by keeping only the pointers from "other" that are in splitPointerIds.

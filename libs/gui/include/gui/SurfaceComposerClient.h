@@ -438,6 +438,13 @@ public:
                                             uid_t ownerUid = gui::Uid::INVALID.val(),
                                             float requestedRefreshRate = 0);
 
+    // NX809J: ABI-compat overload for Qualcomm's prebuilt Wi-Fi Display source
+    // (libwfdmmsrc_system.so, QSSI16), which calls the pre-ownerUid 5-arg signature.
+    // Forwards with ownerUid = INVALID. Not for new code.
+    static sp<IBinder> createVirtualDisplay(const std::string& displayName, bool isSecure,
+                                            bool optimizeForPower, const std::string& uniqueId,
+                                            float requestedRefreshRate);
+
     static status_t destroyVirtualDisplay(const sp<IBinder>& displayToken);
 
     static sp<IBinder> createDisplay(const String8& displayName, bool isSecure,
