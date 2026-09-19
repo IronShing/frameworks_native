@@ -100,10 +100,10 @@ void QtiSurfaceExtensionGPP::DisableGPPinternal(sp<IGraphicBufferProducer>* gbp)
     if (mIsEnable && mFuncDeinit) {
         reinterpret_cast<DeinitFunc_t>(mFuncDeinit)(mHandle);
     }
-    if (mLibHandler != nullptr) {
-        dlclose(mLibHandler);
-    }
-    mLibHandler = nullptr;
+    // NX809J: keep libgppextension loaded. QSSI dlclose()d it here but left mFuncInit/mFuncDeinit
+    // pointing into the unmapped image, so a dynamic off (0x21) followed by a dynamic on (0x22)
+    // on the same Surface -- RedMagic Control's per-game switch flipping while a game is alive --
+    // called Init through a dangling pointer. The destructor closes the handle.
     mGbp = nullptr;
     if (mOriginalGbp != nullptr) {
         if (static_cast<uint32_t>(mFrameRate) != 0) {

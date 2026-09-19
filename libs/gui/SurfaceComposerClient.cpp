@@ -1274,6 +1274,14 @@ sp<IBinder> SurfaceComposerClient::createVirtualDisplay(const std::string& displ
     return status.isOk() ? display : nullptr;
 }
 
+sp<IBinder> SurfaceComposerClient::createVirtualDisplay(const std::string& displayName,
+                                                        bool isSecure, bool optimizeForPower,
+                                                        const std::string& uniqueId,
+                                                        float requestedRefreshRate) {
+    return createVirtualDisplay(displayName, isSecure, optimizeForPower, uniqueId,
+                                gui::Uid::INVALID.val(), requestedRefreshRate);
+}
+
 status_t SurfaceComposerClient::destroyVirtualDisplay(const sp<IBinder>& displayToken) {
     return ComposerServiceAIDL::getComposerService()
             ->destroyVirtualDisplay(displayToken)
