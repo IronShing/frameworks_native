@@ -10,6 +10,13 @@
 #include <cutils/properties.h>
 #include "QtiSurfaceExtensionGPP.h"
 #include <unordered_map>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <fstream>
+#include <memory>
+#include <string>
+#include <thread>
 
 using ::android::IGraphicBufferProducer;
 using ::android::sp;
@@ -17,6 +24,69 @@ using ::android::status_t;
 using ::android::IBinder;
 
 typedef status_t (*InitFunc_t)(sp<IGraphicBufferProducer>*, const sp<IBinder>&);
+
+// NX809J (XDA #288/#301): GPP Init makes a SYNCHRONOUS binder call to gppservice
+// (BpGPPService::createSession) from inside Surface::connect on the RenderThread. When gppservice
+// wedged after a GameHub/Wine session died, SystemUI's and the launcher's RenderThreads blocked
+// there forever -> whole screen frozen while the system stayed up (adb fine, no ANR recovery).
+// Two guards: never attach GPP to the system UI processes (they are not games), and bound Init:
+// it runs on a helper thread and a caller that waits longer than kInitTimeout gives up on GPP for
+// that surface and keeps drawing; after one timeout the whole process skips GPP for kHungBackoff.
+static constexpr auto kInitTimeout = std::chrono::milliseconds(800);
+static constexpr auto kHungBackoff = std::chrono::seconds(60);
+static std::atomic<int64_t> sGppHungUntilMs{0};
+
+static int64_t nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static bool isNeverGppProcess() {
+    std::ifstream f("/proc/self/cmdline");
+    std::string name;
+    std::getline(f, name, '\0');
+    return name == "com.android.systemui" || name.rfind("com.android.launcher", 0) == 0 ||
+            name.rfind("com.android.systemui:", 0) == 0;
+}
+
+// Runs Init with a deadline. On success *gbp is replaced like a direct Init call would.
+// On timeout returns TIMED_OUT and leaves *gbp untouched; the helper thread keeps its own copies
+// (and its own reference on libgppextension) so a late return touches nothing of ours.
+static status_t initWithTimeout(void* initFn, sp<IGraphicBufferProducer>* gbp,
+                                const sp<IBinder>& handle) {
+    struct State {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false;
+        status_t err = android::UNKNOWN_ERROR;
+        sp<IGraphicBufferProducer> gbp;
+        sp<IBinder> handle;
+    };
+    auto st = std::make_shared<State>();
+    st->gbp = *gbp;
+    st->handle = handle;
+    void* lib = dlopen("libgppextension.so", RTLD_NOW | RTLD_GLOBAL);   // pin for the thread
+    std::thread([st, initFn, lib]() {
+        status_t err = reinterpret_cast<InitFunc_t>(initFn)(&st->gbp, st->handle);
+        {
+            std::lock_guard<std::mutex> l(st->m);
+            st->err = err;
+            st->done = true;
+        }
+        st->cv.notify_all();
+        if (lib) dlclose(lib);
+    }).detach();
+    std::unique_lock<std::mutex> l(st->m);
+    if (!st->cv.wait_for(l, kInitTimeout, [&] { return st->done; })) {
+        sGppHungUntilMs.store(nowMs() + std::chrono::duration_cast<std::chrono::milliseconds>(
+                kHungBackoff).count());
+        ALOGW("gppservice did not answer createSession within %lld ms; GPP skipped for %lld s",
+              (long long)kInitTimeout.count(), (long long)kHungBackoff.count());
+        return android::TIMED_OUT;
+    }
+    if (st->err == android::OK) *gbp = st->gbp;
+    return st->err;
+}
 typedef void (*DeinitFunc_t)(const sp<IBinder>&);
 static constexpr uint32_t BQ_LAYER_COUNT = 1;
 
@@ -48,6 +118,10 @@ QtiSurfaceExtensionGPP::QtiSurfaceExtensionGPP(
     // The system application will not enter this logic.
     mUID = getuid();
     if (mUID < FIRST_APPLICATION_UID) {
+        mIsSupported = false;
+        return;
+    }
+    if (isNeverGppProcess()) {
         mIsSupported = false;
         return;
     }
@@ -135,7 +209,11 @@ bool QtiSurfaceExtensionGPP::DynamicEnableInternal(sp<IGraphicBufferProducer>* g
         if (enable !=-1 && mIsEnable != enable) {
             if (enable) {
                 ALOGV("Enabling GPP feather");
-                status_t err = reinterpret_cast<InitFunc_t>(mFuncInit)(gbp, mHandle);
+                if (nowMs() < sGppHungUntilMs.load()) {
+                    ALOGV("gppservice recently unresponsive; not enabling GPP");
+                    return true;
+                }
+                status_t err = initWithTimeout(mFuncInit, gbp, mHandle);
                 if (err == OK) {
                     mIsEnable = true;
                     mIsSupported = true;
@@ -147,6 +225,11 @@ bool QtiSurfaceExtensionGPP::DynamicEnableInternal(sp<IGraphicBufferProducer>* g
                     }
                 } else {
                     mIsEnable = false;
+                    if (err == TIMED_OUT) {
+                        // Leave mIsSupported set: a later dynamic on may try again after the
+                        // back-off, once gppservice has recovered.
+                        return true;
+                    }
                     if (err == NAME_NOT_FOUND || err == INVALID_OPERATION) {
                        mIsSupported = false;
                        ALOGV("Failed to init GPP: Surface or App is not supported by GPP");
